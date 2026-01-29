@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="dashboard-grid">
+    <!-- Trending Keywords Section -->
+    <section class="card trending-keywords">
+        <h2>🔥 Trending Keywords</h2>
+        <p class="subtitle">Top {{ data.top_words|length if data.top_words else 0 }} words from processed articles</p>
+
+        <div class="word-list" id="word-list">
+            {% if data.top_words %}
+                {% set max_count = data.top_words.values()|max %}
+                {% for word, count in data.top_words.items() %}
+                <div class="word-item">
+                    <span class="word">{{ word }}</span>
+                    <div class="bar-container">
+                        <div class="bar" style="width: {{ (count / max_count * 100)|round }}%"></div>
+                    </div>
+                    <span class="count">{{ count }}</span>
+                </div>
+                {% endfor %}
+            {% else %}
+                <p class="no-data">No data yet. Waiting for articles...</p>
+            {% endif %}
+        </div>
+    </section>
+
+    <!-- Recent Articles Section -->
+    <section class="card recent-articles">
+        <h2>📰 Recent Articles</h2>
+        <p class="subtitle">{{ data.articles_processed }} articles processed</p>
+
+        <ul class="article-list" id="article-list">
+            {% if data.recent_articles %}
+                {% for article in data.recent_articles|reverse %}
+                <li class="article-item">
+                    <span class="article-title">{{ article.title|truncate(60) }}</span>
+                    <div class="article-meta">
+                        <span class="source">{{ article.source }}</span>
+                        <span class="word-count">{{ article.total_words }} words</span>
+                    </div>
+                </li>
+                {% endfor %}
+            {% else %}
+                <li class="no-data">Waiting for articles...</li>
+            {% endif %}
+        </ul>
+    </section>
+
+    <!-- Stats Summary -->
+    <section class="card stats-summary">
+        <h2>📈 Statistics</h2>
+        <div class="stat-grid">
+            <div class="stat-item">
+                <span class="stat-value" id="total-articles">{{ data.articles_processed }}</span>
+                <span class="stat-label">Articles Processed</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-value" id="unique-words">{{ data.top_words|length if data.top_words else 0 }}</span>
+                <span class="stat-label">Unique Keywords</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-value" id="total-words">
+                    {{ data.top_words.values()|sum if data.top_words else 0 }}
+                </span>
+                <span class="stat-label">Total Word Count</span>
+            </div>
+        </div>
+    </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const REFRESH_INTERVAL = {{ refresh_interval }};
+
+    // Update connection status indicator
+    function updateStatus(isConnected) {
+        const statusEl = document.getElementById('connection-status');
+        const dotEl = statusEl.querySelector('.status-dot');
+        const textEl = statusEl.querySelector('.status-text');
+
+        if (isConnected) {
+            dotEl.className = 'status-dot connected';
+            textEl.textContent = 'Connected';
+        } else {
+            dotEl.className = 'status-dot disconnected';
+            textEl.textContent = 'Disconnected';
+        }
+    }
+
+    // Update last update timestamp
+    function updateLastUpdate(timestamp) {
+        const el = document.getElementById('last-update');
+        if (timestamp) {
+            const date = new Date(timestamp);
+            el.textContent = date.toLocaleTimeString();
+        } else {
+            el.textContent = 'Never';
+        }
+    }
+
+    // Render word list with bars
+    function renderWordList(topWords) {
+        const container = document.getElementById('word-list');
+
+        if (!topWords || Object.keys(topWords).length === 0) {
+            container.innerHTML = '<p class="no-data">No data yet. Waiting for articles...</p>';
+            return;
+        }
+
+        const maxCount = Math.max(...Object.values(topWords));
+        let html = '';
+
+        for (const [word, count] of Object.entries(topWords)) {
+            const barWidth = Math.round((count / maxCount) * 100);
+            html += `
+                <div class="word-item">
+                    <span class="word">${word}</span>
+                    <div class="bar-container">
+                        <div class="bar" style="width: ${barWidth}%"></div>
+                    </div>
+                    <span class="count">${count}</span>
+                </div>
+            `;
+        }
+
+        container.innerHTML = html;
+    }
+
+    // Render recent articles list
+    function renderArticleList(articles) {
+        const container = document.getElementById('article-list');
+
+        if (!articles || articles.length === 0) {
+            container.innerHTML = '<li class="no-data">Waiting for articles...</li>';
+            return;
+        }
+
+        let html = '';
+        // Show most recent first
+        for (const article of articles.slice().reverse()) {
+            const title = article.title.length > 60
+                ? article.title.substring(0, 60) + '...'
+                : article.title;
+            html += `
+                <li class="article-item">
+                    <span class="article-title">${title}</span>
+                    <div class="article-meta">
+                        <span class="source">${article.source}</span>
+                        <span class="word-count">${article.total_words} words</span>
+                    </div>
+                </li>
+            `;
+        }
+
+        container.innerHTML = html;
+    }
+
+    // Update statistics summary
+    function updateStats(data) {
+        document.getElementById('total-articles').textContent = data.articles_processed || 0;
+        document.getElementById('unique-words').textContent =
+            data.top_words ? Object.keys(data.top_words).length : 0;
+        document.getElementById('total-words').textContent =
+            data.top_words ? Object.values(data.top_words).reduce((a, b) => a + b, 0) : 0;
+    }
+
+    // Fetch and update dashboard
+    async function refreshDashboard() {
+        try {
+            const response = await fetch('/api/stats');
+            const data = await response.json();
+
+            updateStatus(data.is_connected);
+            updateLastUpdate(data.last_update);
+            renderWordList(data.top_words);
+            renderArticleList(data.recent_articles);
+            updateStats(data);
+
+        } catch (error) {
+            console.error('Failed to fetch stats:', error);
+            updateStatus(false);
+        }
+    }
+
+    // Initial load and start polling
+    document.addEventListener('DOMContentLoaded', () => {
+        // Initial refresh
+        refreshDashboard();
+
+        // Set up polling interval
+        setInterval(refreshDashboard, REFRESH_INTERVAL);
+    });
+</script>
+{% endblock %}
